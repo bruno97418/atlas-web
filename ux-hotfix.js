@@ -8,14 +8,16 @@
     if(!m) return 'Non classées';
     const o=m.object||{};
     const known=(typeof atlasKnownEr6Family==='function'?atlasKnownEr6Family(m.address):'')||'';
-    const text=[o.semantic_family,o.semantic_name,o.name,o.technical_name,known].filter(Boolean).join(' ').toLowerCase();
+    const text=[o.knowledge_family,o.semantic_family,o.knowledge_name,o.semantic_name,o.name,o.technical_name,o.technical_role,known].filter(Boolean).join(' ').toLowerCase();
+    if(/\baxis\b|breakpoint|axe/.test(text)) return 'Axes';
     if(/allum|ignition|spark|avance/.test(text)) return 'Allumage';
     if(/inject|fuel|essence|carbur/.test(text)) return 'Injection';
-    if(/\btps\b|throttle|papillon/.test(text)) return 'TPS';
+    if(/\btps\b|throttle|papillon|\bload\b|charge/.test(text)) return 'TPS / Charge';
     if(/fan|ventilat|cooling fan/.test(text)) return 'Fan control';
     if(/lambda|afr|richesse|oxygen|o2/.test(text)) return 'Lambda';
     if(/temp|ect|iat|coolant/.test(text)) return 'Température';
     if(/limit|limiteur|rev|rpm limit|speed limit/.test(text)) return 'Limiteurs';
+    if(/idle|ralenti/.test(text)) return 'Ralenti';
     if(/boost|turbo|wastegate/.test(text)) return 'Turbo / Boost';
     if(/torque|couple/.test(text)) return 'Couple';
     return 'Non classées';
@@ -33,11 +35,13 @@
       ['Toutes','Toutes les familles'],
       ['Allumage','Allumage'],
       ['Injection','Injection'],
-      ['TPS','TPS / Papillon'],
+      ['TPS / Charge','TPS / Charge / Papillon'],
       ['Fan control','Fan control / Ventilateur'],
-      ['Lambda','Lambda / AFR'],
-      ['Température','Température'],
+      ['Lambda','Lambda / AFR / Richesse'],
+      ['Température','Température ECT / IAT'],
       ['Limiteurs','Limiteurs'],
+      ['Ralenti','Ralenti'],
+      ['Axes','Axes / Breakpoints'],
       ['Turbo / Boost','Turbo / Boost'],
       ['Couple','Couple'],
       ['Non classées','Non classées']
@@ -48,11 +52,19 @@
 
   function displayName(m){
     const o=m.object||{};
+    if(o.knowledge_name) return o.knowledge_name;
     if(typeof atlasMapLabel==='function') return atlasMapLabel(o,m.address);
     return o.semantic_name||o.name||o.semantic_family||o.technical_name||o.object_id||o.object_kind||'Objet';
   }
 
-  // Override list renderer to support semantic family dropdown and visible group headings.
+  function provenance(o){
+    const s=String(o?.knowledge_status||o?.semantic_status||'');
+    if(/CONFIRMED_BY_ER6_REFERENCE/.test(s)) return 'Confirmé ER-6';
+    if(/DERIVED_FROM_DESCRIPTOR/.test(s)) return 'Axe dérivé validé';
+    if(/OVERLAY/.test(s)) return 'Base ER-6';
+    return 'Autonome';
+  }
+
   window.renderMapList=function(){
     ensureFamilySelect();
     const list=$q('#mapList'); if(!list) return;
@@ -61,13 +73,13 @@
     list.innerHTML='';
     const visible=[];
     mapModels.forEach((m,i)=>{
-      const family=familyOfModel(m),name=displayName(m);
-      const searchable=`${family} ${name} ${m.object?.object_id||''} ${hex(m.address)} ${m.object?.object_kind||''}`.toLowerCase();
+      const family=familyOfModel(m),name=displayName(m),prov=provenance(m.object);
+      const searchable=`${family} ${name} ${prov} ${m.object?.object_id||''} ${hex(m.address)} ${m.object?.object_kind||''}`.toLowerCase();
       if(selectedFamily!=='Toutes'&&family!==selectedFamily) return;
       if(query&&!searchable.includes(query)) return;
-      visible.push({m,i,family,name});
+      visible.push({m,i,family,name,prov});
     });
-    const familyOrder=['Allumage','Injection','TPS','Fan control','Lambda','Température','Limiteurs','Turbo / Boost','Couple','Non classées'];
+    const familyOrder=['Allumage','Injection','TPS / Charge','Fan control','Lambda','Température','Limiteurs','Ralenti','Axes','Turbo / Boost','Couple','Non classées'];
     const groups=new Map();
     visible.forEach(x=>{if(!groups.has(x.family))groups.set(x.family,[]);groups.get(x.family).push(x)});
     familyOrder.forEach(family=>{
@@ -75,10 +87,10 @@
       if(selectedFamily==='Toutes'){
         const h=document.createElement('div');h.className='atlas-family-heading';h.textContent=`${family} · ${rows.length}`;list.appendChild(h);
       }
-      rows.forEach(({m,i,family,name})=>{
+      rows.forEach(({m,i,family,name,prov})=>{
         const d=document.createElement('div');
         d.className='map-item'+(i===selectedMap?' active':'');
-        d.innerHTML=`<strong>${esc(name)}</strong><span>${family} · ${hex(m.address)} · ${m.rows}×${m.cols} · ${esc(m.type)}</span>`;
+        d.innerHTML=`<strong>${esc(name)}</strong><span>${family} · ${prov} · ${hex(m.address)} · ${m.rows}×${m.cols} · ${esc(m.type)}</span>`;
         d.onclick=()=>{selectedMap=i;if(typeof atlasSelectedRow!=='undefined')atlasSelectedRow=0;renderMapList();loadMapConfig();renderSelectedMap()};
         list.appendChild(d);
       });
@@ -86,7 +98,6 @@
     const count=$q('#mapCount'); if(count) count.textContent=`${visible.length}/${mapModels.length}`;
   };
 
-  // Real vertical zoom: moving the slider explicitly leaves auto-scale mode.
   function bindZoom(){
     const zy=$q('#cfgZoomY');
     if(zy){
@@ -97,7 +108,6 @@
     const auto=$q('#autoScale'); if(auto) auto.onclick=()=>{yAuto=true;if(zy)zy.value='1';draw2D();};
   }
 
-  // Keep family filter after each map rebuild without modifying the analyzer result.
   const oldRebuild=window.rebuildMaps;
   window.rebuildMaps=function(){
     oldRebuild();
