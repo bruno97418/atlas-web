@@ -11,15 +11,39 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">A</span><div><strong>ATLAS</strong><small>V9 Firmware Intelligence</small></div></div>
-      <nav><button class="nav active" data-view="analyze">Analyse</button><button class="nav" data-view="maps">Maps</button><button class="nav" data-view="memory">Mémoire</button><button class="nav" data-view="report">Rapport</button></nav>
-      <div class="sidebar-foot"><span class="dot"></span> ATLAS Web</div>
+      <nav>
+        <button class="nav active" data-view="analyze">Analyse</button>
+        <button class="nav" data-view="maps">Maps</button>
+        <button class="nav" data-view="memory">Mémoire</button>
+        <button class="nav" data-view="report">Rapport</button>
+      </nav>
+      <button class="nav" id="cloudSettings">⚙ API Cloud</button>
+      <div class="sidebar-foot"><span class="dot" id="cloudDot"></span><span id="cloudState">Cloud non configuré</span></div>
     </aside>
     <main>
-      <header><div><h1>Analyse firmware</h1><p>Charge un dump ECU et inspecte sa structure directement dans le navigateur.</p></div><div class="status-pill" id="engineStatus">ATLAS Web · prêt</div></header>
-      <section id="view-analyze" class="view active"><div class="upload-card" id="dropZone"><input id="fileInput" type="file" accept=".bin,.ori,.hex,.rom,.flash,*/*" hidden /><div class="upload-icon">⬆</div><h2>Déposer un dump ECU</h2><p>Glisse le fichier ici ou sélectionne-le depuis ton appareil.</p><button class="primary" id="browseBtn">Choisir un fichier</button><small>Le fichier reste local dans le navigateur pour cette version Web.</small></div><div id="workspace" class="hidden"><div class="filebar"><div><strong id="fileName">—</strong><span id="fileMeta">—</span></div><button class="primary" id="analyzeBtn">Lancer l’analyse</button></div><div class="metrics"><article><span>Taille</span><strong id="metricSize">—</strong></article><article><span>SHA-256</span><strong id="metricHash">—</strong></article><article><span>Entropie</span><strong id="metricEntropy">—</strong></article><article><span>Remplissage FF/00</span><strong id="metricFill">—</strong></article></div><div class="panel-grid"><section class="panel"><div class="panel-head"><h3>Carte mémoire</h3><span>échantillonnage</span></div><canvas id="memoryCanvas" width="1000" height="260"></canvas></section><section class="panel"><div class="panel-head"><h3>Détection</h3><span id="detectBadge">en attente</span></div><div id="detections" class="detections"></div></section></div></div></section>
-      <section id="view-maps" class="view"><div class="panel"><div class="panel-head"><h3>Visualiseur de map</h3><span>2D / 3D</span></div><div class="map-toolbar"><select id="mapSelect"></select><button id="toggle3d">Vue 3D</button></div><div id="mapPlot" class="plot"></div></div></section>
-      <section id="view-memory" class="view"><div class="panel"><div class="panel-head"><h3>Inspection mémoire</h3><span>hex aperçu</span></div><pre id="hexView">Charge un dump pour afficher les premiers octets.</pre></div></section>
-      <section id="view-report" class="view"><div class="panel"><div class="panel-head"><h3>Rapport ATLAS Web</h3><span>session courante</span></div><pre id="reportView">Aucune analyse exécutée.</pre></div></section>
+      <header>
+        <div><h1>Analyse firmware</h1><p>Charge un dump ECU et lance le vrai moteur privé ATLAS V9 dans le cloud.</p></div>
+        <div class="status-pill" id="engineStatus">ATLAS Web · prêt</div>
+      </header>
+      <section id="view-analyze" class="view active">
+        <div class="upload-card" id="dropZone">
+          <input id="fileInput" type="file" accept=".bin,.ori,.hex,.rom,.flash,*/*" hidden />
+          <div class="upload-icon">⬆</div><h2>Déposer un dump ECU</h2>
+          <p>Glisse le fichier ici ou sélectionne-le depuis ton appareil.</p>
+          <button class="primary" id="browseBtn">Choisir un fichier</button>
+          <small>Avec ATLAS Cloud, le dump est stocké temporairement puis supprimé après l’analyse.</small>
+        </div>
+        <div id="workspace" class="hidden">
+          <div class="filebar"><div><strong id="fileName">—</strong><span id="fileMeta">—</span></div><button class="primary" id="analyzeBtn">Lancer ATLAS V9</button></div>
+          <div class="metrics"><article><span>Taille</span><strong id="metricSize">—</strong></article><article><span>SHA-256</span><strong id="metricHash">—</strong></article><article><span>Architecture</span><strong id="metricEntropy">—</strong></article><article><span>Objets détectés</span><strong id="metricFill">—</strong></article></div>
+          <div class="panel-grid"><section class="panel"><div class="panel-head"><h3>Carte mémoire</h3><span>aperçu local</span></div><canvas id="memoryCanvas" width="1000" height="260"></canvas></section><section class="panel"><div class="panel-head"><h3>Résultat ATLAS</h3><span id="detectBadge">en attente</span></div><div id="detections" class="detections"></div></section></div>
+        </div>
+      </section>
+      <section id="view-maps" class="view"><div class="panel"><div class="panel-head"><h3>Objets / Maps</h3><span>inventaire ATLAS V9</span></div><div class="map-toolbar"><select id="mapSelect"></select><button id="toggle3d">Vue 3D</button></div><div id="mapPlot" class="plot"></div><pre id="mapDetails">Aucun résultat ATLAS V9.</pre></div></section>
+      <section id="view-memory" class="view"><div class="panel"><div class="panel-head"><h3>Inspection mémoire</h3><span>hex aperçu local</span></div><pre id="hexView">Charge un dump pour afficher les premiers octets.</pre></div></section>
+      <section id="view-report" class="view"><div class="panel"><div class="panel-head"><h3>Rapport ATLAS V9</h3><span>JSON firmware-only</span></div><pre id="reportView">Aucune analyse exécutée.</pre></div></section>
     </main>
-  </div><script src="app.js"></script>
+  </div>
+  <dialog id="settingsDialog"><form method="dialog" class="settings-form"><h3>ATLAS Cloud</h3><label>URL du backend sécurisé<input id="apiBaseInput" placeholder="https://atlas-web-api.xxx.workers.dev" /></label><p>Cette URL n’est pas une clé et peut être enregistrée dans le navigateur.</p><div><button value="cancel">Annuler</button><button class="primary" id="saveApi" value="default">Enregistrer</button></div></form></dialog>
+  <script src="app.js"></script>
 </body></html>
