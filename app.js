@@ -1,113 +1,37 @@
-const $=s=>document.querySelector(s);
-let currentFile=null,currentBytes=null,atlasResult=null,view3d=true,mapModels=[];
+const $=s=>document.querySelector(s);const OWNER='bruno97418',REPO='desktop-tutorial',BRANCH='main',WORKFLOW='atlas-web-analyze.yml';let currentFile=null,currentBytes=null,atlasResult=null,mapModels=[],selectedMap=0,mapMode='2d',yAuto=true,token=localStorage.getItem('atlas_github_token')||'';
 
-document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>{document.querySelectorAll('.nav,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#view-'+b.dataset.view).classList.add('active');if(b.dataset.view==='maps')renderMap()});
-$('#browseBtn').onclick=()=>$('#fileInput').click();
-$('#fileInput').onchange=e=>loadFile(e.target.files[0]);
-$('#resultInput').onchange=e=>loadAtlasResult(e.target.files[0]);
-const dz=$('#dropZone');
-['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag')}));
-['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag')}));
-dz.addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));
-$('#analyzeBtn').onclick=localAnalyze;
-$('#toggle3d').onclick=()=>{view3d=!view3d;$('#toggle3d').textContent=view3d?'Vue 2D':'Vue 3D';renderMap()};
-$('#mapSelect').onchange=renderMap;
+document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>{document.querySelectorAll('.nav,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#view-'+b.dataset.view).classList.add('active');if(b.dataset.view==='maps')renderSelectedMap()});
+$('#browseBtn').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=e=>loadFile(e.target.files[0]);const dz=$('#dropZone');['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));$('#analyzeBtn').onclick=runAtlas;$('#saveToken').onclick=saveToken;$('#clearToken').onclick=()=>{localStorage.removeItem('atlas_github_token');token='';$('#githubToken').value='';setConn(false,'Jeton effacé')};$('#githubToken').value=token;$('#mapFilter').oninput=renderMapList;$('#applyMapCfg').onclick=applyManualConfig;$('#mode2d').onclick=()=>switchMapMode('2d');$('#mode3d').onclick=()=>switchMapMode('3d');$('#autoScale').onclick=()=>{yAuto=true;draw2D()};['cfgZoomX','cfgZoomY'].forEach(id=>$('#'+id).oninput=()=>draw2D());if(token)testToken();
 
-async function loadFile(file){
-  if(!file)return;
-  currentFile=file;currentBytes=new Uint8Array(await file.arrayBuffer());
-  $('#workspace').classList.remove('hidden');
-  $('#fileName').textContent=file.name;
-  $('#fileMeta').textContent=`${file.type||'binaire'} · ${new Date(file.lastModified).toLocaleString()}`;
-  $('#metricSize').textContent=formatBytes(file.size);$('#metricHash').textContent='calcul…';
-  $('#engineStatus').textContent='ATLAS Web · dump local chargé';
-  $('#hexView').textContent=hexPreview(currentBytes);drawMemory(currentBytes);
-  const hash=await crypto.subtle.digest('SHA-256',currentBytes);
-  $('#metricHash').textContent=[...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,16)+'…';
-  rebuildMaps();
-}
+async function api(path,opt={}){const headers={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(opt.headers||{})};if(token)headers.Authorization=`Bearer ${token}`;const r=await fetch(`https://api.github.com${path}`,{...opt,headers});if(!r.ok){let t='';try{t=(await r.json()).message}catch{}throw new Error(`${r.status} ${t||r.statusText}`)}return r.status===204?null:r.json()}
+async function saveToken(){token=$('#githubToken').value.trim();if(!token)return;localStorage.setItem('atlas_github_token',token);await testToken()}
+async function testToken(){try{const r=await api(`/repos/${OWNER}/${REPO}`);setConn(true,`Connecté · ${r.full_name}`);$('#tokenStatus').innerHTML='<strong>État</strong><span>Accès au dépôt privé validé.</span>'}catch(e){setConn(false,'Accès refusé');$('#tokenStatus').innerHTML=`<strong>Erreur</strong><span>${esc(e.message)}</span>`}}
+function setConn(ok,msg){$('#connectionState').textContent=msg;$('.dot').style.background=ok?'var(--ok)':'var(--bad)'}
 
-function localAnalyze(){
-  if(!currentBytes)return;
-  let counts=new Array(256).fill(0);for(const b of currentBytes)counts[b]++;
-  let h=0;for(const c of counts)if(c){const p=c/currentBytes.length;h-=p*Math.log2(p)}
-  const fill=(counts[0]+counts[255])/currentBytes.length*100;
-  $('#metricEntropy').textContent=h.toFixed(3)+' bit';$('#metricFill').textContent=fill.toFixed(1)+' %';
-  const rows=[['Pré-analyse locale',`Entropie ${h.toFixed(3)} bit · FF/00 ${fill.toFixed(1)} %`],['Analyse complète','Dépose le même dump dans ATLAS_INBOX : le workflow privé démarre automatiquement.']];
-  $('#detections').innerHTML=cards(rows);$('#detectBadge').textContent='local';
-}
+async function loadFile(file){if(!file)return;currentFile=file;currentBytes=new Uint8Array(await file.arrayBuffer());atlasResult=null;$('#workspace').classList.remove('hidden');$('#fileName').textContent=file.name;$('#fileMeta').textContent=`${formatBytes(file.size)} · ${new Date(file.lastModified).toLocaleString()}`;$('#metricSize').textContent=formatBytes(file.size);$('#metricArch').textContent='—';$('#metricObjects').textContent='—';$('#hexView').textContent=hexPreview(currentBytes,4096);drawMemory(currentBytes);const hash=await crypto.subtle.digest('SHA-256',currentBytes);$('#metricHash').textContent=[...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,16)+'…';setProgress(0,'Dump prêt. Clique sur « Lancer ATLAS V9 ».','upload');rebuildMaps()}
 
-async function loadAtlasResult(file){
-  if(!file)return;
-  try{
-    atlasResult=JSON.parse(await file.text());
-  }catch(e){alert('JSON ATLAS invalide');return;}
-  const arch=atlasResult.architecture?.architecture||atlasResult.architecture?.selected?.architecture||'inconnue';
-  const fam=atlasResult.family?.family||atlasResult.family?.vendor||'inconnue';
-  const profile=atlasResult.profile||'inconnu';
-  const count=atlasResult.object_count??(atlasResult.objects||[]).length;
-  $('#engineStatus').textContent='ATLAS V9 · résultat privé chargé';
-  $('#detectBadge').textContent='ATLAS V9';
-  $('#detections').innerHTML=cards([['Architecture',arch],['Famille ECU',fam],['Profil',profile],['Objets détectés',String(count)]]);
-  $('#reportView').textContent=JSON.stringify(atlasResult,null,2);
-  rebuildMaps();
-  document.querySelector('[data-view="maps"]').click();
-}
+async function runAtlas(){if(!currentFile||!currentBytes)return;if(!token){document.querySelector('[data-view="settings"]').click();$('#tokenStatus').innerHTML='<strong>Configuration requise</strong><span>Enregistre une fois un jeton GitHub limité au dépôt privé pour que tout se fasse ensuite dans ATLAS Web.</span>';return}$('#analyzeBtn').disabled=true;try{setProgress(5,'Préparation du firmware…','upload');const path=`ATLAS_INBOX/${safeName(currentFile.name||'firmware.bin')}`;const content=bytesToBase64(currentBytes);setProgress(12,'Envoi sécurisé vers le dépôt privé…','upload');const commit=await api(`/repos/${OWNER}/${REPO}/contents/${encodePath(path)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:`ATLAS Web upload: ${currentFile.name}`,content,branch:BRANCH})});const sha=commit.commit.sha;setProgress(25,'Firmware envoyé. Attente du runner GitHub Actions…','queue');const run=await waitForRun(sha);await monitorRun(run.id);setProgress(88,'Analyse terminée. Récupération des résultats…','result');await fetchLatestResult(path);setProgress(100,'Analyse ATLAS V9 terminée. Résultats et maps disponibles.','result',true);document.querySelector('[data-view="maps"]').click()}catch(e){setProgress(100,`Erreur: ${e.message}`,null,false,true)}finally{$('#analyzeBtn').disabled=false}}
 
-function rebuildMaps(){
-  mapModels=[];
-  const objects=atlasResult?.objects||[];
-  if(currentBytes){
-    for(const o of objects){
-      const rows=Number(o.rows||o.y_count||o.height||0),cols=Number(o.columns||o.cols||o.x_count||o.width||0);
-      if(rows>1&&cols>1&&rows*cols<=65536){
-        const width=rawWidth(o.raw_type,o.access_widths);const address=Number(o.address);
-        if(Number.isFinite(address)&&address>=0){
-          const z=extractGrid(currentBytes,address,rows,cols,width,o.raw_type);
-          if(z)mapModels.push({name:`${o.object_id||o.technical_name||'MAP'} · 0x${address.toString(16).toUpperCase()} · ${rows}×${cols}`,z,object:o});
-        }
-      }
-    }
-  }
-  if(!mapModels.length&&objects.length){
-    const candidates=objects.filter(o=>String(o.object_kind||'').includes('MAP')).slice(0,100);
-    for(const o of candidates){
-      const address=Number(o.address);if(!Number.isFinite(address))continue;
-      mapModels.push({name:`${o.object_id||'MAP'} · 0x${address.toString(16).toUpperCase()}`,z:[[0]],object:o,placeholder:true});
-    }
-  }
-  const sel=$('#mapSelect');sel.innerHTML='';
-  if(!mapModels.length)sel.add(new Option('Charge un résultat ATLAS + le dump local',0));
-  else mapModels.forEach((m,i)=>sel.add(new Option(m.name,i)));
-  renderMap();
-}
+async function waitForRun(sha){for(let i=0;i<45;i++){const r=await api(`/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&per_page=10`);const run=(r.workflow_runs||[]).find(x=>x.head_sha===sha);if(run)return run;await sleep(2000);setProgress(Math.min(34,25+i/4),'Workflow en file d’attente…','queue')}throw new Error('Le workflow ATLAS ne démarre pas')}
+async function monitorRun(id){for(let i=0;i<120;i++){const jobs=await api(`/repos/${OWNER}/${REPO}/actions/runs/${id}/jobs`);const j=(jobs.jobs||[])[0];if(j){const done=(j.steps||[]).filter(s=>s.status==='completed').length,total=Math.max(1,(j.steps||[]).length);const pct=35+Math.round((done/total)*48);const active=(j.steps||[]).find(s=>s.status==='in_progress');setProgress(pct,active?`ATLAS V9 · ${active.name}`:`ATLAS V9 · ${done}/${total} étapes`,'engine');if(j.status==='completed'){if(j.conclusion!=='success')throw new Error(`Analyse terminée avec état ${j.conclusion}`);return}}await sleep(2500)}throw new Error('Délai d’analyse dépassé')}
+async function fetchLatestResult(path){const stem=path.split('/').pop().replace(/\.[^.]+$/,'');for(let i=0;i<20;i++){try{const latest=await api(`/repos/${OWNER}/${REPO}/contents/${encodePath(`ATLAS_RESULTS/${stem}/LATEST.txt`)}?ref=${BRANCH}`);const stamp=decodeB64(latest.content).trim();const data=await api(`/repos/${OWNER}/${REPO}/contents/${encodePath(`ATLAS_RESULTS/${stem}/${stamp}-result.json`)}?ref=${BRANCH}`);atlasResult=JSON.parse(decodeB64(data.content));applyResult();return}catch(e){if(i===19)throw e;await sleep(1500)}}}
+function applyResult(){const a=atlasResult.architecture||{},arch=a.architecture||a.selected?.architecture||'inconnue',family=atlasResult.family?.family||atlasResult.family?.vendor||'inconnue',count=atlasResult.object_count??(atlasResult.objects||[]).length;$('#metricArch').textContent=arch;$('#metricObjects').textContent=count;$('#engineStatus').textContent='ATLAS V9 · analyse chargée';$('#detectBadge').textContent='ATLAS V9';$('#detections').innerHTML=cards([['Architecture',arch],['Famille ECU',family],['Profil',atlasResult.profile||'inconnu'],['Objets détectés',count],['Code / XREF',JSON.stringify(atlasResult.diagnostics||{})]]);$('#reportView').textContent=JSON.stringify(atlasResult,null,2);rebuildMaps()}
 
-function rawWidth(raw,access){
-  const s=String(raw||'').toLowerCase();
-  if(s.includes('32'))return 4;if(s.includes('16'))return 2;if(s.includes('8'))return 1;
-  if(Array.isArray(access)&&access.length)return Math.max(1,Math.min(4,Number(access[0])||1));
-  return 1;
-}
-function extractGrid(bytes,address,rows,cols,width,raw){
-  const size=rows*cols*width;if(address<0||address+size>bytes.length)return null;
-  const little=String(raw||'').toLowerCase().includes('le');const signed=String(raw||'').toLowerCase().startsWith('s');
-  const z=[];let p=address;
-  for(let y=0;y<rows;y++){const row=[];for(let x=0;x<cols;x++){
-    let v=0;if(width===1)v=bytes[p];else if(width===2)v=little?(bytes[p]|bytes[p+1]<<8):(bytes[p]<<8|bytes[p+1]);else v=little?(bytes[p]|bytes[p+1]<<8|bytes[p+2]<<16|bytes[p+3]<<24)>>>0:((bytes[p]<<24|bytes[p+1]<<16|bytes[p+2]<<8|bytes[p+3])>>>0);
-    if(signed){const bits=width*8,limit=2**(bits-1);if(v>=limit)v-=2**bits}row.push(v);p+=width;
-  }z.push(row)}return z;
-}
-function renderMap(){
-  if(typeof Plotly==='undefined')return;
-  const m=mapModels[+$('#mapSelect').value||0];
-  if(!m){Plotly.purge('mapPlot');return;}
-  if(m.placeholder){Plotly.react('mapPlot',[{x:[0],y:[0],mode:'markers',text:[JSON.stringify(m.object)],hoverinfo:'text'}],{paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#cfe0f3'},annotations:[{text:'Géométrie non résolue pour cet objet',showarrow:false,x:.5,y:.5,xref:'paper',yref:'paper'}]},{responsive:true,displaylogo:false});return;}
-  const data=view3d?[{z:m.z,type:'surface',showscale:true}]:[{z:m.z,type:'heatmap'}];
-  Plotly.react('mapPlot',data,{paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#cfe0f3'},margin:{l:45,r:20,t:25,b:45},title:{text:m.name,font:{size:13}}},{responsive:true,displaylogo:false});
-}
-function drawMemory(bytes){const c=$('#memoryCanvas'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);const bins=250,step=Math.max(1,Math.floor(bytes.length/bins));for(let i=0;i<bins;i++){let s=0,n=0,start=i*step,end=Math.min(bytes.length,start+step);for(let j=start;j<end;j+=Math.max(1,Math.floor(step/64))){s+=bytes[j];n++}const v=n?s/n/255:0,x=i*c.width/bins,w=c.width/bins+1,h=v*c.height;g.fillStyle=`rgba(${Math.round(55+100*v)},${Math.round(145+70*v)},${Math.round(220+30*v)},.9)`;g.fillRect(x,c.height-h,w,h)}}
-function hexPreview(bytes){let out=[];for(let i=0;i<Math.min(bytes.length,512);i+=16){const row=[...bytes.slice(i,i+16)].map(b=>b.toString(16).padStart(2,'0')).join(' ');out.push(i.toString(16).padStart(8,'0')+'  '+row)}return out.join('\n')}
-function formatBytes(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KiB';return(n/1048576).toFixed(2)+' MiB'}
-function cards(rows){return rows.map(x=>`<div class="detection"><strong>${escapeHtml(x[0])}</strong><span>${escapeHtml(x[1])}</span></div>`).join('')}
-function escapeHtml(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+function setProgress(pct,text,step,done=false,error=false){pct=Math.max(0,Math.min(100,Math.round(pct)));$('#progressBar').style.width=pct+'%';$('#progressPercent').textContent=pct+' %';$('#progressText').textContent=text;document.querySelectorAll('.steps span').forEach(x=>x.className='');const order=['upload','queue','engine','result'],idx=step?order.indexOf(step):-1;order.forEach((s,i)=>{const e=document.querySelector(`[data-step="${s}"]`);if(i<idx)e.classList.add('done');else if(i===idx)e.classList.add(error?'error':done?'done':'active')});if(done)document.querySelectorAll('.steps span').forEach(x=>x.classList.add('done'))}
+
+function rebuildMaps(){mapModels=[];const objects=atlasResult?.objects||[];for(const o of objects){if(!/MAP|AXIS/i.test(String(o.object_kind||'')))continue;const address=Number(o.address);if(!Number.isFinite(address))continue;const rows=Math.max(1,Number(o.rows||o.y_count||1)),cols=Math.max(1,Number(o.columns||o.cols||o.x_count||o.count||16));mapModels.push({object:o,address,rows,cols,type:normalizeType(o.raw_type),factor:Number.isFinite(Number(o.factor))?Number(o.factor):1,offset:Number.isFinite(Number(o.offset))?Number(o.offset):0})}selectedMap=Math.min(selectedMap,Math.max(0,mapModels.length-1));$('#mapCount').textContent=mapModels.length;renderMapList();loadMapConfig();renderSelectedMap()}
+function renderMapList(){const q=$('#mapFilter').value.toLowerCase();$('#mapList').innerHTML='';mapModels.forEach((m,i)=>{const o=m.object,label=`${o.object_id||o.technical_name||o.object_kind||'Objet'} ${hex(m.address)} ${o.object_kind||''}`;if(q&&!label.toLowerCase().includes(q))return;const d=document.createElement('div');d.className='map-item'+(i===selectedMap?' active':'');d.innerHTML=`<strong>${esc(o.object_id||o.technical_name||o.object_kind||'Objet')}</strong><span>${hex(m.address)} · ${m.rows}×${m.cols} · ${esc(m.type)}</span>`;d.onclick=()=>{selectedMap=i;renderMapList();loadMapConfig();renderSelectedMap()};$('#mapList').appendChild(d)})}
+function loadMapConfig(){const m=mapModels[selectedMap];if(!m)return;$('#cfgAddress').value=hex(m.address);$('#cfgRows').value=m.rows;$('#cfgCols').value=m.cols;$('#cfgType').value=m.type;$('#cfgFactor').value=m.factor;$('#cfgOffset').value=m.offset;$('#selectedInfo').textContent=`${m.object.object_kind||''} · confiance ${m.object.confidence||'—'}`}
+function applyManualConfig(){let m=mapModels[selectedMap];if(!m){m={object:{object_kind:'MANUAL'},address:0,rows:16,cols:16,type:'u8',factor:1,offset:0};mapModels=[m];selectedMap=0}m.address=parseAddr($('#cfgAddress').value);m.rows=Math.max(1,+$('#cfgRows').value||1);m.cols=Math.max(1,+$('#cfgCols').value||1);m.type=$('#cfgType').value;m.factor=+$('#cfgFactor').value||1;m.offset=+$('#cfgOffset').value||0;renderMapList();renderSelectedMap()}
+function getGrid(){const m=mapModels[selectedMap];if(!m||!currentBytes)return null;const info=typeInfo(m.type),need=m.rows*m.cols*info.width;if(m.address<0||m.address+need>currentBytes.length)return null;let p=m.address,z=[];for(let y=0;y<m.rows;y++){let row=[];for(let x=0;x<m.cols;x++){let v=readVal(currentBytes,p,info);row.push(v*m.factor+m.offset);p+=info.width}z.push(row)}return z}
+function renderSelectedMap(){const z=getGrid();if(!z){clear2D('Dump local ou géométrie insuffisante');return}renderTable(z);if(mapMode==='2d')draw2D(z);else draw3D(z)}
+function switchMapMode(mode){mapMode=mode;$('#mode2d').classList.toggle('active',mode==='2d');$('#mode3d').classList.toggle('active',mode==='3d');$('#twoDWrap').classList.toggle('hidden',mode!=='2d');$('#mapPlot').classList.toggle('hidden',mode!=='3d');renderSelectedMap()}
+function draw2D(z=getGrid()){if(!z)return;const c=$('#map2d'),ctx=c.getContext('2d'),zx=+$('#cfgZoomX').value||1,zy=+$('#cfgZoomY').value||1;const flat=z.flat(),w=Math.max(1200,flat.length*8*zx),h=520;c.width=w;c.height=h;ctx.clearRect(0,0,w,h);ctx.fillStyle='#06111e';ctx.fillRect(0,0,w,h);let min=Math.min(...flat),max=Math.max(...flat);if(min===max){min-=1;max+=1}const pad=45;ctx.strokeStyle='#19324a';ctx.lineWidth=1;ctx.font='11px ui-monospace';ctx.fillStyle='#7fa2bd';for(let i=0;i<=10;i++){const y=pad+(h-2*pad)*i/10;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke();const val=max-(max-min)*i/10;ctx.fillText(val.toFixed(2),4,y+4)}const span=(max-min)/zy,mid=(max+min)/2,lo=yAuto?min:mid-span/2,hi=yAuto?max:mid+span/2;ctx.strokeStyle='#28d3ff';ctx.lineWidth=1.5;ctx.beginPath();flat.forEach((v,i)=>{const x=pad+(w-2*pad)*i/Math.max(1,flat.length-1),y=pad+(hi-v)/(hi-lo)*(h-2*pad);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();const m=mapModels[selectedMap];ctx.fillStyle='#b9d8ef';ctx.fillText(`${hex(m.address)} · ${m.rows}×${m.cols} · ${m.type} · min ${min.toFixed(3)} max ${max.toFixed(3)}`,pad,20)}
+function clear2D(msg){const c=$('#map2d'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);g.fillStyle='#8aa0b8';g.fillText(msg,30,40);$('#mapTable thead').innerHTML='';$('#mapTable tbody').innerHTML=''}
+function draw3D(z){if(typeof Plotly==='undefined')return;const m=mapModels[selectedMap];Plotly.react('mapPlot',[{z,type:'surface',showscale:true}],{paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#cfe0f3'},margin:{l:45,r:20,t:35,b:45},title:{text:`${hex(m.address)} · ${m.rows}×${m.cols}`,font:{size:13}}},{responsive:true,displaylogo:false})}
+function renderTable(z){const thead=$('#mapTable thead'),tbody=$('#mapTable tbody');thead.innerHTML='<tr><th>Y\\X</th>'+z[0].map((_,i)=>`<th>${i}</th>`).join('')+'</tr>';tbody.innerHTML=z.map((r,y)=>'<tr><th>'+y+'</th>'+r.map(v=>`<td>${Number(v).toFixed(3)}</td>`).join('')+'</tr>').join('')}
+
+function typeInfo(t){t=String(t).toLowerCase();return{width:t.includes('32')?4:t.includes('16')?2:1,little:t.endsWith('le'),signed:t.startsWith('s')}}function readVal(b,p,i){let v=0;if(i.width===1)v=b[p];else if(i.width===2)v=i.little?(b[p]|b[p+1]<<8):(b[p]<<8|b[p+1]);else v=i.little?((b[p]|b[p+1]<<8|b[p+2]<<16|b[p+3]<<24)>>>0):((b[p]<<24|b[p+1]<<16|b[p+2]<<8|b[p+3])>>>0);if(i.signed){const bits=i.width*8,lim=2**(bits-1);if(v>=lim)v-=2**bits}return v}function normalizeType(r){const s=String(r||'').toLowerCase();if(s.includes('32'))return(s.startsWith('s')?'s':'u')+'32'+(s.includes('le')?'le':'be');if(s.includes('16'))return(s.startsWith('s')?'s':'u')+'16'+(s.includes('le')?'le':'be');return s.startsWith('s')?'s8':'u8'}
+function drawMemory(bytes){const c=$('#memoryCanvas'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);const bins=300,step=Math.max(1,Math.floor(bytes.length/bins));for(let i=0;i<bins;i++){let s=0,n=0,start=i*step,end=Math.min(bytes.length,start+step);for(let j=start;j<end;j+=Math.max(1,Math.floor(step/64))){s+=bytes[j];n++}const v=n?s/n/255:0,x=i*c.width/bins,w=c.width/bins+1,h=v*c.height;g.fillStyle=`rgba(${Math.round(55+100*v)},${Math.round(145+70*v)},${Math.round(220+30*v)},.9)`;g.fillRect(x,c.height-h,w,h)}}
+function bytesToBase64(bytes){let out='',chunk=0x8000;for(let i=0;i<bytes.length;i+=chunk)out+=String.fromCharCode(...bytes.subarray(i,i+chunk));return btoa(out)}function decodeB64(s){const raw=atob(String(s).replace(/\n/g,''));const u=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)u[i]=raw.charCodeAt(i);return new TextDecoder().decode(u)}function encodePath(p){return p.split('/').map(encodeURIComponent).join('/')}function safeName(n){return n.replace(/[\\/:*?"<>|]/g,'_')}function parseAddr(v){v=String(v).trim();return /^0x/i.test(v)?parseInt(v,16):parseInt(v,10)||0}function hex(v){return'0x'+Number(v||0).toString(16).toUpperCase().padStart(6,'0')}function sleep(ms){return new Promise(r=>setTimeout(r,ms))}function formatBytes(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KiB';return(n/1048576).toFixed(2)+' MiB'}function hexPreview(bytes,max){let out=[];for(let i=0;i<Math.min(bytes.length,max);i+=16)out.push(i.toString(16).padStart(8,'0')+'  '+[...bytes.slice(i,i+16)].map(b=>b.toString(16).padStart(2,'0')).join(' '));return out.join('\n')}function cards(rows){return rows.map(x=>`<div class="detection"><strong>${esc(x[0])}</strong><span>${esc(x[1])}</span></div>`).join('')}function esc(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 rebuildMaps();
