@@ -1,12 +1,7 @@
-// ATLAS Web 2D view: single selected Y row, full profile fitted by default; Zoom X/Y enlarge only.
+// ATLAS Web 2D view: WinOLS-like single trace of the complete map, fitted by default.
 (function(){
   'use strict';
   const q=s=>document.querySelector(s);
-
-  function axisValues(m,key,count){
-    if(typeof atlasAxisValues==='function') return atlasAxisValues(m,key,count);
-    return null;
-  }
 
   function ensureDefaults(){
     const zx=q('#cfgZoomX'),zy=q('#cfgZoomY');
@@ -19,8 +14,7 @@
     ensureDefaults();
     const c=q('#map2d'),wrap=q('#twoDWrap'),ctx=c.getContext('2d');
     const m=mapModels[selectedMap];
-    const rowIndex=Math.max(0,Math.min(z.length-1,Number(window.atlasSelectedRow||0)));
-    const row=z[rowIndex];
+    const values=z.flat(); // one continuous trace: whole map in memory order
     const zx=Math.max(.5,Number(q('#cfgZoomX')?.value||1));
     const zy=Math.max(.5,Number(q('#cfgZoomY')?.value||1));
     const baseW=Math.max(720,(wrap?.clientWidth||1200)-8);
@@ -31,65 +25,75 @@
     c.style.height=c.height+'px';
 
     ctx.clearRect(0,0,c.width,c.height);
-    ctx.fillStyle='#05090d';ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle='#0610a8';
+    ctx.fillRect(0,0,c.width,c.height);
 
-    let min=Math.min(...row),max=Math.max(...row);
+    let min=Math.min(...values),max=Math.max(...values);
     if(min===max){min-=1;max+=1;}
-    const rawSpan=max-min;
-    const margin=Math.max(rawSpan*.12,1);
+    const span=max-min;
+    const margin=Math.max(span*.06,1);
     const lo=min-margin,hi=max+margin;
-    const padL=68,padR=24,padT=34,padB=54;
+    const padL=58,padR=28,padT=26,padB=44;
     const plotW=c.width-padL-padR,plotH=c.height-padT-padB;
-    const xvals=axisValues(m,'x_axis',row.length)||row.map((_,i)=>i);
-    const yvals=axisValues(m,'y_axis',z.length);
 
-    // WinOLS-like dark graph area, restrained grid and single profile.
-    ctx.font='11px ui-monospace, SFMono-Regular, Consolas, monospace';
+    // Dense WinOLS-like grid.
+    ctx.font='10px ui-monospace, SFMono-Regular, Consolas, monospace';
     ctx.lineWidth=1;
-    for(let i=0;i<=8;i++){
-      const yy=padT+plotH*i/8;
-      ctx.strokeStyle=i===8?'#53616b':'#26313a';
+    for(let i=0;i<=12;i++){
+      const yy=padT+plotH*i/12;
+      ctx.strokeStyle='rgba(185,205,255,.28)';
       ctx.beginPath();ctx.moveTo(padL,yy);ctx.lineTo(c.width-padR,yy);ctx.stroke();
-      ctx.fillStyle='#a5b0b7';
-      ctx.fillText((hi-(hi-lo)*i/8).toFixed(2),7,yy+4);
+      ctx.fillStyle='rgba(220,230,255,.82)';
+      ctx.fillText((hi-(hi-lo)*i/12).toFixed(0),5,yy+3);
     }
-    const labelStep=Math.max(1,Math.ceil(xvals.length/14));
-    xvals.forEach((v,i)=>{
-      const xx=padL+plotW*i/Math.max(1,row.length-1);
-      ctx.strokeStyle='#202b33';
+    for(let i=0;i<=24;i++){
+      const xx=padL+plotW*i/24;
+      ctx.strokeStyle='rgba(185,205,255,.22)';
       ctx.beginPath();ctx.moveTo(xx,padT);ctx.lineTo(xx,c.height-padB);ctx.stroke();
-      if(i%labelStep===0||i===xvals.length-1){
-        ctx.fillStyle='#a5b0b7';ctx.fillText(String(v),Math.max(padL,xx-10),c.height-27);
-      }
-    });
+    }
 
-    // Single selected map line only.
-    ctx.strokeStyle='#00d7ff';
-    ctx.lineWidth=2;
+    // Single white profile for the COMPLETE map. Fit-to-width at Zoom X = 1.
+    ctx.strokeStyle='#f2f4ff';
+    ctx.lineWidth=1.15;
     ctx.beginPath();
-    row.forEach((v,i)=>{
-      const xx=padL+plotW*i/Math.max(1,row.length-1);
+    values.forEach((v,i)=>{
+      const xx=padL+plotW*i/Math.max(1,values.length-1);
       const yy=padT+(hi-v)/(hi-lo)*plotH;
       if(i===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);
     });
     ctx.stroke();
 
-    // Small value nodes, similar to an editable calibration profile.
-    ctx.fillStyle='#d8f7ff';
-    row.forEach((v,i)=>{
-      const xx=padL+plotW*i/Math.max(1,row.length-1);
-      const yy=padT+(hi-v)/(hi-lo)*plotH;
-      ctx.fillRect(Math.round(xx)-2,Math.round(yy)-2,4,4);
-    });
+    // Sparse point markers only when zoomed enough; avoids a solid block at overview scale.
+    if(zx>=2.5 || values.length<250){
+      ctx.fillStyle='#ffffff';
+      const step=zx>=5?1:Math.max(1,Math.ceil(values.length/(plotW/5)));
+      for(let i=0;i<values.length;i+=step){
+        const xx=padL+plotW*i/Math.max(1,values.length-1);
+        const yy=padT+(hi-values[i])/(hi-lo)*plotH;
+        ctx.fillRect(Math.round(xx)-1,Math.round(yy)-1,3,3);
+      }
+    }
 
-    const yLabel=yvals?`Y=${yvals[rowIndex]}`:`ligne Y ${rowIndex}`;
-    ctx.fillStyle='#d8e0e5';
-    ctx.fillText(`${hex(m.address)} · ${m.rows}×${m.cols} · ${m.type} · ${yLabel} · profil complet`,padL,18);
-    ctx.fillStyle='#89969f';
-    ctx.fillText(`min ${min.toFixed(3)}   max ${max.toFixed(3)}   X ${xvals[0]} → ${xvals[xvals.length-1]}`,padL,c.height-8);
+    // Memory-address scale across the full map, like WinOLS 2D overview.
+    const bytesPerValue=(m.type.includes('32')?4:m.type.includes('16')?2:1);
+    const start=Number(m.address)||0;
+    const end=start+Math.max(0,values.length*bytesPerValue-1);
+    ctx.fillStyle='rgba(235,240,255,.9)';
+    ctx.fillText(`${hex(start)} · ${m.rows}×${m.cols} · ${values.length} points · vue 2D complète`,padL,15);
+    const addrSteps=12;
+    for(let i=0;i<=addrSteps;i++){
+      const xx=padL+plotW*i/addrSteps;
+      const addr=Math.round(start+(end-start)*i/addrSteps);
+      ctx.fillStyle='rgba(220,230,255,.85)';
+      ctx.save();
+      ctx.translate(xx,c.height-8);
+      ctx.rotate(-Math.PI/4);
+      ctx.fillText(hex(addr),0,0);
+      ctx.restore();
+    }
   };
 
-  const oldRender=window.renderSelectedMap;
+  // Keep table and 3D unchanged; 2D always uses the full flattened map trace.
   window.renderSelectedMap=function(){
     const z=typeof getGrid==='function'?getGrid():null;
     if(!z){if(typeof clear2D==='function')clear2D('Dump local ou géométrie insuffisante');return;}
@@ -102,15 +106,15 @@
   if(zy){zy.min='.5';zy.max='8';zy.step='.25';zy.oninput=()=>draw2D();}
   if(reset){reset.textContent='Réinitialiser zoom';reset.onclick=()=>{if(zx)zx.value='1';if(zy)zy.value='1';draw2D();};}
 
-  const configureRowControl=()=>{
-    const b=document.getElementById('atlasOverlayBtn');if(b)b.style.display='none';
+  // Row selection is irrelevant in the complete WinOLS-like 2D overview.
+  const hideRowControl=()=>{
     const control=document.getElementById('atlasRowControl');
-    if(control){const label=control.querySelector('.muted');if(label)label.textContent='Ligne affichée';}
+    if(control)control.style.display='none';
   };
-  configureRowControl();setTimeout(configureRowControl,200);
+  hideRowControl();setTimeout(hideRowControl,200);setTimeout(hideRowControl,1000);
 
   const style=document.createElement('style');
-  style.textContent='#twoDWrap{overflow:auto;background:#05090d}#map2d{display:block;max-width:none}';
+  style.textContent='#twoDWrap{overflow:auto;background:#0610a8}#map2d{display:block;max-width:none}';
   document.head.appendChild(style);
   window.addEventListener('resize',()=>{if(mapMode==='2d')draw2D();});
 })();
