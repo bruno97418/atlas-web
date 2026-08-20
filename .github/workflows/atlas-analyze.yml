@@ -1,0 +1,94 @@
+name: ATLAS Cloud Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: ATLAS job UUID
+        required: true
+        type: string
+      filename:
+        description: Original firmware filename
+        required: true
+        type: string
+      worker_url:
+        description: ATLAS Worker base URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download firmware from private job storage
+        env:
+          WORKER_URL: ${{ inputs.worker_url }}
+          JOB_ID: ${{ inputs.job_id }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+        run: |
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${WORKER_SHARED_SECRET}" \
+            "${WORKER_URL}/internal/jobs/${JOB_ID}/input" \
+            -o /tmp/atlas_firmware.bin
+
+      - name: Checkout private ATLAS V9 engine
+        uses: actions/checkout@v4
+        with:
+          repository: bruno97418/desktop-tutorial
+          ref: agent/atlas-v9
+          token: ${{ secrets.ATLAS_ENGINE_TOKEN }}
+          path: engine
+          fetch-depth: 1
+
+      - name: Run ATLAS V9 firmware-only analyzer
+        env:
+          PYTHONPATH: ${{ github.workspace }}/engine/ATLAS_V9/src
+        run: |
+          python "engine/ATLAS_V9/src/atlas_v9_analyzer.py" \
+            /tmp/atlas_firmware.bin \
+            -o /tmp/atlas_result.json
+
+      - name: Add Web transport metadata
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          FILENAME: ${{ inputs.filename }}
+        run: |
+          python - <<'PY'
+          import json, os
+          p='/tmp/atlas_result.json'
+          d=json.load(open(p,encoding='utf-8'))
+          d['web_job']={'job_id':os.environ['JOB_ID'],'filename':os.environ['FILENAME']}
+          with open(p,'w',encoding='utf-8') as f: json.dump(d,f,ensure_ascii=False,indent=2)
+          PY
+
+      - name: Return result and delete transient firmware
+        if: success()
+        env:
+          WORKER_URL: ${{ inputs.worker_url }}
+          JOB_ID: ${{ inputs.job_id }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+        run: |
+          curl --fail --silent --show-error -X PUT \
+            -H "Authorization: Bearer ${WORKER_SHARED_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/atlas_result.json \
+            "${WORKER_URL}/internal/jobs/${JOB_ID}/result"
+          rm -f /tmp/atlas_firmware.bin /tmp/atlas_result.json
+
+      - name: Report failure and request input deletion
+        if: failure()
+        env:
+          WORKER_URL: ${{ inputs.worker_url }}
+          JOB_ID: ${{ inputs.job_id }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+        run: |
+          printf '%s' 'ATLAS V9 analysis failed. Check the GitHub Actions run.' >/tmp/atlas_error.txt
+          curl --silent --show-error -X PUT \
+            -H "Authorization: Bearer ${WORKER_SHARED_SECRET}" \
+            --data-binary @/tmp/atlas_error.txt \
+            "${WORKER_URL}/internal/jobs/${JOB_ID}/error" || true
+          rm -f /tmp/atlas_firmware.bin /tmp/atlas_result.json /tmp/atlas_error.txt
