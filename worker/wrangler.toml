@@ -1,0 +1,13 @@
+name = "atlas-web-api"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+
+[[r2_buckets]]
+binding = "ATLAS_JOBS"
+bucket_name = "atlas-web-jobs"
+
+[vars]
+ALLOWED_ORIGINS = "https://bruno97418.github.io"
+WORKFLOW_REPO = "bruno97418/atlas-web"
+WORKFLOW_FILE = "atlas-analyze.yml"
+MAX_UPLOAD_BYTES = "33554432"
